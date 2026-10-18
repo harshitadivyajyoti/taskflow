@@ -1,19 +1,6 @@
 import { useEffect, useState } from "react";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-// One helper for every request, so error handling lives in one place
-async function api(path, options = {}) {
-  const res = await fetch(`${API_URL}/api${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...options,
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(typeof body.detail === "string" ? body.detail : "Request failed");
-  }
-  return res.status === 204 ? null : res.json();
-}
+import { api } from "./api.js";
+import AIPanel from "./AIPanel.jsx";
 
 function App() {
   const [tasks, setTasks] = useState([]);
@@ -21,16 +8,14 @@ function App() {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
 
-  // Add-form fields
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState("medium");
   const [deadline, setDeadline] = useState("");
+  const [estimate, setEstimate] = useState(30);
 
-  // Edit state: which task is being edited, and its draft values
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState({ title: "", priority: "medium", deadline: "" });
+  const [draft, setDraft] = useState({ title: "", priority: "medium", deadline: "", estimate_minutes: 30 });
 
-  // Load tasks once when the page opens
   useEffect(() => {
     async function load() {
       try {
@@ -50,12 +35,13 @@ function App() {
     try {
       const created = await api("/tasks", {
         method: "POST",
-        body: JSON.stringify({ title, priority, deadline }),
+        body: JSON.stringify({ title, priority, deadline, estimate_minutes: Number(estimate) }),
       });
       setTasks([created, ...tasks]);
       setTitle("");
       setPriority("medium");
       setDeadline("");
+      setEstimate(30);
       setError("");
     } catch (e) {
       setError(e.message);
@@ -85,7 +71,12 @@ function App() {
 
   function startEdit(task) {
     setEditingId(task.id);
-    setDraft({ title: task.title, priority: task.priority, deadline: task.deadline });
+    setDraft({
+      title: task.title,
+      priority: task.priority,
+      deadline: task.deadline,
+      estimate_minutes: task.estimate_minutes,
+    });
   }
 
   async function saveEdit(id) {
@@ -93,7 +84,7 @@ function App() {
     try {
       const updated = await api(`/tasks/${id}`, {
         method: "PATCH",
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, estimate_minutes: Number(draft.estimate_minutes) }),
       });
       setTasks(tasks.map((t) => (t.id === id ? updated : t)));
       setEditingId(null);
@@ -108,6 +99,7 @@ function App() {
     if (filter === "completed") return t.completed;
     return true;
   });
+  const pendingCount = tasks.filter((t) => !t.completed).length;
 
   return (
     <main className="app">
@@ -129,8 +121,24 @@ function App() {
           <option value="high">High</option>
         </select>
         <input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+        <label className="estimate-field">
+        Takes   
+        <input
+          type="number"
+          className="estimate-input"
+          min="5"
+          max="480"
+          step="5"
+          title="Estimated minutes"
+          value={estimate}
+          onChange={(e) => setEstimate(e.target.value)}
+        />
+        min
+        </label>
         <button type="submit">Add</button>
       </form>
+
+      <AIPanel pendingCount={pendingCount} />
 
       <div className="filters">
         {["all", "pending", "completed"].map((f) => (
@@ -174,6 +182,19 @@ function App() {
                   value={draft.deadline}
                   onChange={(e) => setDraft({ ...draft, deadline: e.target.value })}
                 />
+                <label className="estimate-field">
+                  Takes
+                  <input
+                    type="number"
+                    className="estimate-input"
+                    min="5"
+                    max="480"
+                    step="5"
+                    value={estimate}
+                    onChange={(e) => setEstimate(e.target.value)}
+                  />
+                  min
+                </label>
                 <button className="btn-small primary" onClick={() => saveEdit(task.id)}>Save</button>
                 <button className="btn-small" onClick={() => setEditingId(null)}>Cancel</button>
               </div>
@@ -187,7 +208,7 @@ function App() {
                 <div className="task-main">
                   <div className="task-title">{task.title}</div>
                   <div className="task-deadline">
-                    {task.deadline ? `Due ${task.deadline}` : "No deadline"}
+                    {task.deadline ? `Due ${task.deadline}` : "No deadline"} · {task.estimate_minutes} min
                   </div>
                 </div>
                 <span className={`badge badge-${task.priority}`}>{task.priority}</span>
