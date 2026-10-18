@@ -15,12 +15,22 @@ from ai import AIError, build_focus_plan, summarize_workload
 app = FastAPI(title="TaskFlow API")
 
 # Allow the React dev server to call this API from the browser
+
+origins = [
+    o.strip()
+    for o in os.getenv(
+        "FRONTEND_ORIGINS",
+        "http://localhost:5173"
+    ).split(",")
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 Priority = Literal["low", "medium", "high"]
 
@@ -133,3 +143,4 @@ def ai_focus_plan(req: FocusRequest):
         return build_focus_plan(tasks, req.minutes)
     except AIError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
