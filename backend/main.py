@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from pymongo import ReturnDocument
 
 from database import client, tasks_collection
+from ai import AIError, build_focus_plan, summarize_workload
 
 app = FastAPI(title="TaskFlow API")
 
@@ -28,6 +29,7 @@ class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     priority: Priority = "medium"
     deadline: str = Field(default="", pattern=r"^(\d{4}-\d{2}-\d{2})?$")
+    estimate_minutes: int = Field(default=30, ge=5, le=480)
 
 
 class TaskUpdate(BaseModel):
@@ -36,6 +38,7 @@ class TaskUpdate(BaseModel):
     priority: Optional[Priority] = None
     deadline: Optional[str] = Field(default=None, pattern=r"^(\d{4}-\d{2}-\d{2})?$")
     completed: Optional[bool] = None
+    estimate_minutes: Optional[int] = Field(default=None, ge=5, le=480)
 
 
 def serialize(doc: dict) -> dict:
@@ -45,6 +48,7 @@ def serialize(doc: dict) -> dict:
         "title": doc["title"],
         "priority": doc["priority"],
         "deadline": doc["deadline"],
+        "estimate_minutes": doc.get("estimate_minutes", 30),
         "completed": doc["completed"],
     }
 
@@ -98,3 +102,33 @@ def delete_task(task_id: str):
     result = tasks_collection.delete_one({"_id": to_object_id(task_id)})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Task not found")
+
+
+class FocusRequest(BaseModel):
+    minutes: int = Field(ge=15, le=720)
+
+
+def get_pending_tasks():
+    docs = tasks_collection.find({"completed": False}).sort("created_at", -1)
+    tasks = [serialize(d) for d in docs]
+    if not tasks:
+        raise HTTPException(status_code=400, detail="You have no pending tasks to plan.")
+    return tasks
+
+
+@app.post("/api/ai/summary")
+def ai_summary():
+    tasks = get_pending_tasks()
+    try:
+        return summarize_workload(tasks)
+    except AIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@app.post("/api/ai/focus-plan")
+def ai_focus_plan(req: FocusRequest):
+    tasks = get_pending_tasks()
+    try:
+        return build_focus_plan(tasks, req.minutes)
+    except AIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
